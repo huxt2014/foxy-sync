@@ -32,6 +32,11 @@ class Snapshot:
         return data
 
     def diff(self, snapshot):
+        """diff two snapshots, get two list of file identity, with of each is
+         sorted by file path.
+
+        :return: (only_in_self, only_in_other)
+        """
         s = self.file_ids.intersection(snapshot.file_ids)
         only_in_self = self._sort(self.file_ids.difference(s))
         only_in_other = self._sort(snapshot.file_ids.difference(s))
@@ -53,6 +58,16 @@ class Snapshot:
             data += "    %s %s\n" % (md5[0:6], path)
         return data
 
+    def __len__(self):
+        return len(self.file_ids)
+
+    def __getstate__(self):
+        """Support pickle. If override by subcloss, this method will not be
+        invoked automatically.
+        """
+        return {"root": self.root,
+                "file_ids": self.file_ids}
+
 
 class LocalSnapshot(Snapshot):
 
@@ -63,10 +78,8 @@ class LocalSnapshot(Snapshot):
         Snapshot.__init__(self, root)
 
     def push_to(self, snapshot):
-        config = utils.Config()
         if isinstance(snapshot, AliOssSnapshot):
-            return transaction.Local2AliOssTransaction(
-                                    self, snapshot, config.max_workers)
+            return transaction.Local2AliOssTransaction(self, snapshot)
         else:
             raise Exception("%s not support." % type(snapshot))
 
@@ -94,11 +107,10 @@ class LocalSnapshot(Snapshot):
 
 class AliOssSnapshot(Snapshot):
 
-    def __init__(self, endpoint, bucket, access_key_id, access_key_secret):
-        auth = oss2.Auth(access_key_id, access_key_secret)
-        self.bucket = oss2.Bucket(auth, endpoint, bucket)
-        root = "%s:%s" % (endpoint, bucket)
-        Snapshot.__init__(self, root)
+    def __init__(self, endpoint, bucket):
+        self._endpoint = endpoint
+        self._bucket = bucket
+        Snapshot.__init__(self, "%s:%s" % (endpoint, bucket))
 
     def push_to(self, snapshot):
         raise NotImplementedError
@@ -126,3 +138,15 @@ class AliOssSnapshot(Snapshot):
 
         self.bucket.session.session.close()
         self.bucket.session = Oss_Session()
+
+    @utils.lazy_property
+    def bucket(self):
+        config = utils.Config()
+        auth = oss2.Auth(config.access_key_id, config.access_key_secret)
+        return oss2.Bucket(auth, self._endpoint, self._bucket)
+
+    def __getstate__(self):
+        state = Snapshot.__getstate__(self)
+        state.update({"_endpoint": self._endpoint,
+                      "_bucket": self._bucket})
+        return state

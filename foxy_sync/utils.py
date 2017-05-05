@@ -1,6 +1,7 @@
 
 
 import hashlib
+import functools
 
 
 def get_md5(path=None, block_size=64*1024):
@@ -26,16 +27,42 @@ class SingletonMeta(type):
 
 
 class Config(metaclass=SingletonMeta):
+    """Singleton class that stores all the configuration. Though it can be
+    initialized in any where of the program, you'd better to initialize it at
+    the beginning of the program.
+    """
 
+    # for AliOSS
     access_key_id = None
     access_key_secret = None
     end_point = None
     test_bucket = None
+
+    # for local file system
     test_local = None
-    max_workers = None
+
+    # for transaction
+    max_workers = 5
+    dump_dir = "/tmp"
 
     def __init__(self):
         import foxy_sync_settings
         for key in ("access_key_id", "access_key_secret", "end_point",
-                    "test_bucket", "test_local", "max_workers"):
-            setattr(self, key, getattr(foxy_sync_settings, key, None))
+                    "test_bucket", "test_local", "max_workers", "dump_dir"):
+            value = getattr(foxy_sync_settings, key, None)
+            if value is not None:
+                setattr(self, key, value)
+
+
+class lazy_property(object):
+    """Use descriptor.
+    """
+
+    def __init__(self, function):
+        self.function = function
+        functools.update_wrapper(self, function)
+
+    def __get__(self, instance, owner):
+        result = self.function(instance)
+        instance.__dict__[self.function.__name__] = result
+        return result

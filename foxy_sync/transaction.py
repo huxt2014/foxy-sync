@@ -2,10 +2,14 @@
 import os
 import sys
 import time
+import pickle
 import signal
 import collections
 import concurrent.futures as futures
 from threading import Event
+from datetime import datetime
+
+from .utils import Config
 
 
 JobItem = collections.namedtuple("JobItem",
@@ -17,28 +21,29 @@ class Transaction:
 
     # status
     READY = "ready"
-    SUCCEED = "succeed"
+    FINISHED = "finished"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
     # action
     PUSH = "push"
     REMOVE = "remove"
 
-    def __init__(self, src_snapshot, target_snapshot, max_workers=5,
-                 dump_dir="/tmp"):
+    def __init__(self, src_snapshot, target_snapshot):
         self.src_snapshot = src_snapshot
         self.target_snapshot = target_snapshot
-        self.dump_dir = dump_dir
-        self.max_workers = max_workers
+        self.name = "%s_%s>>%s" % (datetime.now().strftime("%Y-%m-%d_%H:%M:%S"),
+                                   src_snapshot.root.replace("/", "|"),
+                                   target_snapshot.root.replace("/", "|"))
         self.jobs = self._get_jobs()
         self.futures = []
-        self.executor = futures.ThreadPoolExecutor(max_workers)
+        self.executor = futures.ThreadPoolExecutor(Config().max_workers)
 
     def start(self):
         for job in self.jobs:
             # some jobs may already finished, for transaction may be loaded
             # from file.
-            if job.status == Transaction.SUCCEED:
+            if job.status == Transaction.FINISHED:
                 continue
             f = self.executor.submit(self._do_job, job)
             self.futures.append(f)
@@ -55,7 +60,7 @@ class Transaction:
                     if f.result(timeout=0.0) == Transaction.FAILED:
                         failed_number += 1
                 except futures.TimeoutError:
-                    # ready or running
+                    # running or in queue
                     tmp_futures.append(f)
 
             if not tmp_futures or len(tmp_futures) == failed_number:
@@ -65,9 +70,9 @@ class Transaction:
                 self.futures = tmp_futures
 
     def cancel_and_exit(self):
-        self.executor.shutdown(wait=False)
         for f in self.futures:
             f.cancel()
+        self.executor.shutdown()
         self.dump()
         sys.exit(0)
 
@@ -77,17 +82,43 @@ class Transaction:
         sys.exit(0)
 
     def dump(self):
-        pass
+        with open(self.dump_path, "wb") as f:
+            pickle.dump(self, f)
 
-    @classmethod
-    def load(cls):
-        pass
+    @property
+    def dump_path(self):
+        return os.path.join(Config().dump_dir, self.name+".ts")
+
+    @staticmethod
+    def load(path):
+        with open(path, "rb") as f:
+            return pickle.load(f)
 
     def _get_jobs(self):
         raise NotImplementedError
 
     def _do_job(self, job):
         raise NotImplementedError
+
+    def __len__(self):
+        return len(self.jobs)
+
+    def __eq__(self, other):
+        if isinstance(other, Transaction):
+            return self.name == other.name and self.jobs == other.jobs
+        else:
+            return False
+
+    def __getstate__(self):
+        return {"src_snapshot": self.src_snapshot,
+                "target_snapshot": self.target_snapshot,
+                "name": self.name,
+                "jobs": self.jobs}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.futures = []
+        self.executor = futures.ThreadPoolExecutor(Config().max_workers)
 
 
 class Local2AliOssTransaction(Transaction):
@@ -110,7 +141,7 @@ class Local2AliOssTransaction(Transaction):
 
     def _do_job(self, job):
         time.sleep(10)
-        return Transaction.SUCCEED
+        return Transaction.FINISHED
 
     def __str__(self):
         data = ''
