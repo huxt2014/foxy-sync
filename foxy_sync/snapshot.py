@@ -2,8 +2,12 @@
 import os
 
 import oss2
+from oss2.http import Session as Oss_Session
 
 from . import utils, transaction
+
+
+__all__ = ["LocalSnapshot", "AliOssSnapshot"]
 
 
 class Snapshot:
@@ -12,22 +16,22 @@ class Snapshot:
         self.file_ids = set()
         self._scan()
 
-    def diff(self, snapshot):
-        only_in_self, only_in_other = self._diff(snapshot)
+    def diff_str(self, snapshot):
+        only_in_self, only_in_other = self.diff(snapshot)
         data = ''
         if only_in_self:
             data += "only in %s ->\n" % self.root
             for md5, path in only_in_self:
-                data += "%s %s\n" % (md5[0:6], path)
+                data += "    %s %s\n" % (md5[0:6], path)
 
         if only_in_other:
             data += "only in %s ->\n" % snapshot.root
             for md5, path in only_in_other:
-                data += "%s %s\n" % (md5[0:6], path)
+                data += "    %s %s\n" % (md5[0:6], path)
 
         return data
 
-    def _diff(self, snapshot):
+    def diff(self, snapshot):
         s = self.file_ids.intersection(snapshot.file_ids)
         only_in_self = self._sort(self.file_ids.difference(s))
         only_in_other = self._sort(snapshot.file_ids.difference(s))
@@ -44,9 +48,9 @@ class Snapshot:
         return sorted(id_set, key=lambda x: x[1])
 
     def __str__(self):
-        data = self.root + "\n"
+        data = "%s -> %s files\n" % (self.root, len(self.file_ids))
         for md5, path in self._sort(self.file_ids):
-            data += "%s %s\n" % (md5[0:6], path)
+            data += "    %s %s\n" % (md5[0:6], path)
         return data
 
 
@@ -59,8 +63,10 @@ class LocalSnapshot(Snapshot):
         Snapshot.__init__(self, root)
 
     def push_to(self, snapshot):
+        config = utils.Config()
         if isinstance(snapshot, AliOssSnapshot):
-            return transaction.Local2AliOssTransaction()
+            return transaction.Local2AliOssTransaction(
+                                    self, snapshot, config.max_workers)
         else:
             raise Exception("%s not support." % type(snapshot))
 
@@ -101,10 +107,22 @@ class AliOssSnapshot(Snapshot):
         marker = ""
 
         while True:
-            objs = [(o.etag, o.key) for o in oss2.ObjectIterator(self.bucket, marker=marker, max_keys=1000)]
+            objs = [(o.etag, o.key)
+                    for o in oss2.ObjectIterator(self.bucket, marker=marker,
+                                                 max_keys=1000)]
             if not objs:
                 break
             else:
                 for etag, key in objs:
                     self.file_ids.add((etag.upper(), key))
                 marker = objs[-1][1]
+
+    def refresh_session(self):
+        """release underlying session in oss2.
+
+        It seems that there is not interface to release underlying socket
+        resource in oss, which will cause warning message when using unittest
+        This method is crude, but simple."""
+
+        self.bucket.session.session.close()
+        self.bucket.session = Oss_Session()
