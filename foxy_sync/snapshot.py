@@ -110,6 +110,10 @@ class LocalSnapshot(Snapshot):
             raise utils.SnapshotError("snapshot type not support: %s " %
                                       type(snapshot))
 
+    @property
+    def short_name(self):
+        return os.path.basename(self.root)
+
     def _scan(self):
         """WARNING: not support cyclic path and link."""
 
@@ -170,6 +174,10 @@ class AliOssSnapshot(Snapshot):
 
         self.bucket.session.session.close()
         self.bucket.session = Oss_Session()
+
+    @property
+    def short_name(self):
+        return self._bucket
 
     @utils.lazy_property
     def bucket(self):

@@ -98,8 +98,6 @@ class CaseTrans(unittest.TestCase):
         # pickle
         ts = Transaction.load(transaction.dump_path)
         self.assertTrue(transaction == ts)
-        self.assertTrue(ts.futures is not None)
-        self.assertTrue(ts.executor is not None)
 
 
 def load_test_snapshot():
