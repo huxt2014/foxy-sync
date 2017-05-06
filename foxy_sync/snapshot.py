@@ -1,5 +1,6 @@
 
 import os
+import logging
 
 import oss2
 from oss2.http import Session as Oss_Session
@@ -7,7 +8,9 @@ from oss2.http import Session as Oss_Session
 from . import utils, transaction
 
 
-__all__ = ["LocalSnapshot", "AliOssSnapshot"]
+__all__ = ["Snapshot", "LocalSnapshot", "AliOssSnapshot"]
+
+logger = logging.getLogger(__name__)
 
 
 class Snapshot:
@@ -15,6 +18,26 @@ class Snapshot:
         self.root = root
         self.file_ids = set()
         self._scan()
+        logger.info("%s files in %s", len(self.file_ids), self.root)
+
+    @staticmethod
+    def get_instance(path):
+        if path.find("alioss") == 0:
+            if len(path) > 9:
+                # alioss://endpoint/bucket
+                segs = path[9:].split("/")
+                if len(segs) != 2:
+                    raise utils.SnapshotError('invalid AliOss path: %s' % path)
+                else:
+                    return AliOssSnapshot(segs[0], segs[1])
+            else:
+                config = utils.Config()
+                return AliOssSnapshot(config.end_point, config.bucket)
+        else:
+            if os.path.isdir(path):
+                return LocalSnapshot(path)
+            else:
+                raise utils.SnapshotError("invalid local directory %s" % path)
 
     def diff_str(self, snapshot):
         only_in_self, only_in_other = self.diff(snapshot)
@@ -73,15 +96,19 @@ class LocalSnapshot(Snapshot):
 
     def __init__(self, root_dir):
         if not os.path.isdir(root_dir):
-            raise Exception("LocalSnapshot need directory.")
+            raise utils.SnapshotError("LocalSnapshot need directory.")
         root = os.path.abspath(os.path.realpath(root_dir))
         Snapshot.__init__(self, root)
 
     def push_to(self, snapshot):
+        """
+        :return: transaction
+        """
         if isinstance(snapshot, AliOssSnapshot):
             return transaction.Local2AliOssTransaction(self, snapshot)
         else:
-            raise Exception("%s not support." % type(snapshot))
+            raise utils.SnapshotError("snapshot type not support: %s " %
+                                      type(snapshot))
 
     def _scan(self):
         """WARNING: not support cyclic path and link."""
@@ -119,9 +146,14 @@ class AliOssSnapshot(Snapshot):
         marker = ""
 
         while True:
-            objs = [(o.etag, o.key)
-                    for o in oss2.ObjectIterator(self.bucket, marker=marker,
-                                                 max_keys=1000)]
+            try:
+                objs = [(o.etag, o.key)
+                        for o in oss2.ObjectIterator(self.bucket, marker=marker,
+                                                     max_keys=1000)]
+            except Exception as e:
+                logger.exception(e)
+                raise utils.SnapshotError('scan AliOss bucket failed.')
+
             if not objs:
                 break
             else:
@@ -142,6 +174,10 @@ class AliOssSnapshot(Snapshot):
     @utils.lazy_property
     def bucket(self):
         config = utils.Config()
+        if not config.access_key_id or not config.access_key_secret:
+            raise utils.SnapshotError("access_key_id or access_key_secret "
+                                      "missing")
+
         auth = oss2.Auth(config.access_key_id, config.access_key_secret)
         return oss2.Bucket(auth, self._endpoint, self._bucket)
 
