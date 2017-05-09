@@ -249,7 +249,7 @@ class AliOssSnapshot(Snapshot):
 
         for f_id in self.files:
             if md5 and f_id.md5 is None:
-                meta = self.bucket.get_object_meta(f_id.path)
+                meta = self.bucket.head_object(f_id.path)
                 f_id.md5 = meta.headers.get(self.meta_md5, "").upper()
             self._frozen_files.add(f_id)
 
