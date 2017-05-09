@@ -107,6 +107,8 @@ class Transaction:
                     size = 0
                     time_stamp = tmp_ts
 
+        except Exception as e:
+            logger.exception(e)
         except KeyboardInterrupt:
             pass
         finally:

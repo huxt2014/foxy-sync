@@ -1,5 +1,6 @@
 
 import os
+import fnmatch
 import logging
 from datetime import datetime
 
@@ -122,6 +123,22 @@ class Snapshot:
         self._load_detail(md5=md5, mtime=mtime)
         self.load_completed = True
 
+    @staticmethod
+    def should_skip(path, directory=False, key=False):
+        if directory:
+            target_dir = path
+        elif key:
+            target_dir = os.path.dirname(path)
+        else:
+            raise utils.SnapshotError("unknown path type")
+
+        config = utils.Config()
+        for p in config.skip_dir:
+            if fnmatch.fnmatch(target_dir, p):
+                return True
+
+        return False
+
     def _load_detail(self, md5=False, mtime=False):
         raise NotImplementedError
 
@@ -184,7 +201,8 @@ class LocalSnapshot(Snapshot):
                 sub_path = os.path.join(path, file)
                 sub_relative_path = os.path.join(relative_path, file)
 
-                if os.path.isdir(sub_path):
+                if (os.path.isdir(sub_path)
+                   and not self.should_skip(sub_relative_path, directory=True)):
                     dir_set.add((sub_path, sub_relative_path))
                 else:
                     self.files.append(FileIdentity(sub_relative_path))
@@ -230,7 +248,8 @@ class AliOssSnapshot(Snapshot):
                 break
             else:
                 for o in objs:
-                    self.files.append(FileIdentity(o.key))
+                    if not self.should_skip(o.key, key=True):
+                        self.files.append(FileIdentity(o.key))
                 marker = objs[-1].key
 
     def refresh_session(self):

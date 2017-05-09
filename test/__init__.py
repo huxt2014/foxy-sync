@@ -1,11 +1,12 @@
 
 import os
+import time
 import shutil
 import unittest
 import tempfile
 
 from foxy_sync.snapshot import *
-from foxy_sync.transaction import Transaction
+from foxy_sync.transaction import Transaction, Local2AliOssTransaction
 from foxy_sync import utils
 
 
@@ -56,8 +57,6 @@ class CaseLocal(unittest.TestCase):
 
         # load_detail
         snapshot.load_detail(md5=True, mtime=True)
-        self.assertRaises(utils.SnapshotError, snapshot.load_detail,
-                          md5=True, mtime=True)
         for f_id in snapshot.frozen_files:
             assert f_id.md5.lower() == self.md5, "%s %s" % (f_id.md5, self.md5)
             assert f_id.path in self.file_set, (f_id.path, self.file_set)
@@ -68,6 +67,20 @@ class CaseLocal(unittest.TestCase):
         # print
         print()
         print(snapshot)
+
+    def test_skip(self):
+        config = utils.Config()
+        config.skip_dir = ["*/movie",
+                           "dir1/*/dir3",
+                           "dir1/dir2"]
+        should_skip = Snapshot.should_skip
+
+        assert should_skip("my/movie", directory=True)
+        assert should_skip("dir1/movie/dir3", directory=True)
+        assert should_skip("dir1/dir2", directory=True)
+        assert should_skip("my/movie/a", key=True)
+        assert should_skip("dir1/movie/dir3/a", key=True)
+        assert should_skip("dir1/dir2/a", key=True)
 
 
 class CaseTrans(unittest.TestCase):
@@ -109,6 +122,11 @@ class CaseTrans(unittest.TestCase):
 
     def test_job(self):
         transaction = self.local_snapshot.push_to(self.alioss_snapshot)
+
+        def _do(self, job):
+            time.sleep(5)
+
+        Local2AliOssTransaction._do = _do
         with self.assertRaises(SystemExit) as cm:
             transaction.start()
         self.assertEqual(cm.exception.args[0], 0)

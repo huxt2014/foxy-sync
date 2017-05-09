@@ -52,6 +52,8 @@ class Run:
         if args.dest is None:
             # load a transaction dump
             ts = Transaction.load(args.src)
+            ts.get_jobs()
+
             if args.i:
                 ts.start()
             else:
