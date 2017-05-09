@@ -9,7 +9,9 @@ from datetime import datetime
 
 import oss2
 
-from .utils import Config, SnapshotError, TransactionError, JobError
+from .utils import (Config, SnapshotError, TransactionError, JobError,
+                    FoxyException)
+from . import snapshot
 
 
 __all__ = ["Transaction", "Local2AliOssTransaction"]
@@ -29,11 +31,12 @@ class _Job:
     PUSH = "push"
     REMOVE = "remove"
 
-    def __init__(self, src, target, md5, action, status=READY,
-                 info="", size=0):
+    def __init__(self, src, target, action, status=READY,
+                 md5=None, mtime=None, info="", size=0):
         self.src = src
         self.target = target
         self.md5 = md5
+        self.mtime = mtime
         self.action = action
         self.status = status
         self.info = info
@@ -51,9 +54,11 @@ class Transaction:
         self.name = "%s_%s>>%s" % (datetime.now().strftime("%Y-%m-%d_%H:%M:%S"),
                                    src_snapshot.short_name,
                                    target_snapshot.short_name)
-        self.jobs = self._get_jobs()
+        self.jobs = None
 
     def start(self):
+
+        self.get_jobs()
 
         finished_number = 0
         failed_number = 0
@@ -132,6 +137,24 @@ class Transaction:
         with open(path, "rb") as f:
             return pickle.load(f)
 
+    def get_jobs(self):
+        """diff snapshots and generate jobs. This method will let snapshot load
+        file details. Do dump if any exception raised. This will let snapshot be
+        able to load file detail from the break point."""
+
+        if self.jobs is not None:
+            return
+
+        try:
+            self.jobs = self._get_jobs()
+        except Exception as e:
+            logger.exception(e)
+            self.dump()
+            raise TransactionError('load jobs failed: %s' % self.dump_path)
+        except KeyboardInterrupt:
+            self.dump()
+            raise TransactionError('canceled: %s' % self.dump_path)
+
     def _get_jobs(self):
         """WARNING: job.info should be initialized as str."""
         raise NotImplementedError
@@ -152,17 +175,21 @@ class Transaction:
 class Local2AliOssTransaction(Transaction):
 
     def _get_jobs(self):
+        for s in (self.src_snapshot, self.target_snapshot):
+            s.load_detail(md5=True)
+
         new_list, removed_list = self.src_snapshot.diff(self.target_snapshot)
         src_root = self.src_snapshot.root
         jobs = []
 
         for file_id in new_list:
-            src = os.path.join(src_root, file_id[1])
+            src = os.path.join(src_root, file_id.path)
             size = os.stat(src).st_size
-            jobs.append(_Job(src=src, target=file_id[1], md5=file_id[0],
+            jobs.append(_Job(src=src, target=file_id.path, md5=file_id.md5,
                              action=_Job.PUSH, size=size))
 
-        jobs += [_Job(src=None, target=file_id[1], md5=None, action=_Job.REMOVE)
+        jobs += [_Job(src=None, target=file_id.path, md5=None,
+                      action=_Job.REMOVE)
                  for file_id in removed_list]
 
         return jobs
@@ -172,7 +199,8 @@ class Local2AliOssTransaction(Transaction):
         if job.action == _Job.PUSH:
             encode_md5 = base64.b64encode(bytearray.fromhex(job.md5)
                                           ).decode()
-            headers = {"Content-MD5": encode_md5}
+            headers = {"Content-MD5": encode_md5,
+                       snapshot.AliOssSnapshot.meta_md5: job.md5}
             try:
                 oss2.resumable_upload(
                         self.target_snapshot.bucket, job.target, job.src,

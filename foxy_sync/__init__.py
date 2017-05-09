@@ -26,7 +26,7 @@ class Run:
     def start(self):
         try:
             self._start()
-        except utils.FoxyException as e:
+        except utils.TransactionError as e:
             print(e)
             sys.exit(1)
         except Exception as e:
@@ -60,6 +60,7 @@ class Run:
             src = Snapshot.get_instance(args.src)
             dest = Snapshot.get_instance(args.dest)
             ts = src.push_to(dest)
+            ts.get_jobs()
 
             if args.i:
                 ts.start()
