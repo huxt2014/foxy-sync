@@ -7,7 +7,7 @@ from datetime import datetime
 import oss2
 from oss2.http import Session as OssSession
 
-from . import utils, transaction
+from . import utils
 
 
 __all__ = ["FileIdentity", "Snapshot", "LocalSnapshot", "AliOssSnapshot"]
@@ -176,6 +176,7 @@ class LocalSnapshot(Snapshot):
         """
         :return: transaction
         """
+        from . import transaction
         if isinstance(snapshot, AliOssSnapshot):
             return transaction.Local2AliOssTransaction(self, snapshot)
         else:
@@ -201,11 +202,10 @@ class LocalSnapshot(Snapshot):
                 sub_path = os.path.join(path, file)
                 sub_relative_path = os.path.join(relative_path, file)
 
-                if (os.path.isdir(sub_path)
-                   and not self.should_skip(sub_relative_path, directory=True)):
-                    dir_set.add((sub_path, sub_relative_path))
-                else:
+                if not os.path.isdir(sub_path):
                     self.files.append(FileIdentity(sub_relative_path))
+                elif not self.should_skip(sub_relative_path, directory=True):
+                    dir_set.add((sub_path, sub_relative_path))
 
     def _load_detail(self, md5=False, mtime=False):
 
@@ -249,7 +249,10 @@ class AliOssSnapshot(Snapshot):
             else:
                 for o in objs:
                     if not self.should_skip(o.key, key=True):
-                        self.files.append(FileIdentity(o.key))
+                        f = FileIdentity(o.key)
+                        if len(o.etag) == 32:
+                            f.md5 = o.etag.upper()
+                        self.files.append(f)
                 marker = objs[-1].key
 
     def refresh_session(self):

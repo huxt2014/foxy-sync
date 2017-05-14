@@ -78,7 +78,7 @@ class Config(metaclass=SingletonMeta):
     end_point = None
     bucket = None
     test_bucket = None
-    multipart_threshold = 10*1024*1024
+    multipart_threshold = 30*1024*1024
 
     # for local file system
     test_local = None
@@ -88,7 +88,7 @@ class Config(metaclass=SingletonMeta):
     cache_dir = "/tmp"
 
     # log configuration
-    log_config = DEFAULT_LOG
+    log_config = None
     log_file = None
 
     # skip directory
