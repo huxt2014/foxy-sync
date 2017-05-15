@@ -3,8 +3,39 @@ import hashlib
 import logging
 import functools
 
+import oss2
 
 logger = logging.getLogger(__name__)
+
+
+class Auth(oss2.Auth):
+    def __get_resource_string(self, req, bucket_name, key):
+        return '/{0}/{1}{2}'.format(bucket_name, key, '?restore')
+
+
+class Bucket(oss2.Bucket):
+
+    auth_for_restore = None
+
+    def restore(self, key):
+        """Restore an archive object. The oss2 does not offer this interface. I
+        guess the main reason is that oss2 use requests to make http request,
+        but requests.Request can not generate the url /obejct?restore using the
+        params, which cause ass2.Auth._sign_request failed.
+        """
+        if self.auth_for_restore is None:
+            self.auth_for_restore = Auth(self.auth.id, self.auth.secret)
+
+        key = oss2.compat.to_string(key)
+        url = '%s?restore' % self._make_url(self.bucket_name, key)
+        req = oss2.http.Request('POST', url)
+        self.auth_for_restore._sign_request(req, self.bucket_name, key)
+
+        resp = self.session.do_request(req, timeout=self.timeout)
+        if resp.status // 100 != 2:
+            raise oss2.exceptions.make_exception(resp)
+
+        return resp
 
 
 def get_md5(path=None, block_size=64*1024):
