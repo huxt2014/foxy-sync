@@ -183,18 +183,19 @@ class Local2AliOssTransaction(Transaction):
         new_list, removed_list = self.src_snapshot.diff(self.target_snapshot)
         new_path = {f.path for f in new_list}
         src_root = self.src_snapshot.root
+        target_prefix = self.target_snapshot.prefix
         jobs = []
 
         for file_id in new_list:
             src = os.path.join(src_root, file_id.path)
             size = os.stat(src).st_size
-            jobs.append(_Job(src=src, target=file_id.path, md5=file_id.md5,
-                             action=_Job.PUSH, size=size))
+            jobs.append(_Job(src=src, target=target_prefix+file_id.path,
+                             md5=file_id.md5, action=_Job.PUSH, size=size))
 
         for file_id in removed_list:
             if file_id.path not in new_path:
-                jobs.append(_Job(src=None, target=file_id.path, md5=None,
-                                 action=_Job.REMOVE))
+                jobs.append(_Job(src=None, target=target_prefix+file_id.path,
+                                 md5=None, action=_Job.REMOVE))
 
         return jobs
 
@@ -230,7 +231,7 @@ class Local2AliOssTransaction(Transaction):
 
         for job in self.jobs:
             if job.action == _Job.PUSH:
-                operator = job.src
+                operator = '%s -> %s' % (job.src, job.target)
             elif job.action == _Job.REMOVE:
                 operator = job.target
             else:

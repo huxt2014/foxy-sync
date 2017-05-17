@@ -17,10 +17,11 @@ logger = logging.getLogger(__name__)
 
 class FileIdentity:
 
-    def __init__(self, path, md5=None, mtime=None):
+    def __init__(self, path, md5=None, mtime=None, prefix=''):
         self.path = path
         self.md5 = md5
         self.mtime = mtime
+        self.prefix = prefix
 
     def __str__(self):
         data = ""
@@ -31,12 +32,14 @@ class FileIdentity:
             data += datetime.fromtimestamp(self.mtime
                                            ).strftime('%Y-%m-%d %H:%M:%S') + ' '
 
-        data += self.path
+        data += self.prefix + self.path
         return data
 
     def __eq__(self, other):
         if isinstance(other, FileIdentity):
-            return self.__dict__ == other.__dict__
+            return (self.path == other.path
+                    and self.md5 == other.md5
+                    and self.mtime == other.mtime)
         else:
             return False
 
@@ -55,7 +58,7 @@ class Snapshot:
         logger.info("%s files in %s", len(self.files), self.root)
 
     @staticmethod
-    def get_instance(path):
+    def get_instance(path, args):
         """
         :param path: alioss[://endpoint/bucket] or /local/directory
         :return: 
@@ -63,13 +66,18 @@ class Snapshot:
         if path.find("alioss") == 0:
             if len(path) > 9:
                 segs = path[9:].split("/")
-                if len(segs) != 2:
+                if len(segs) < 2:
                     raise utils.SnapshotError('invalid AliOss path: %s' % path)
                 else:
-                    return AliOssSnapshot(segs[0], segs[1])
+                    if len(segs) > 2:
+                        prefix = '/'.join(segs[2:])
+                    else:
+                        prefix = getattr(args, 'prefix', None)
+                    return AliOssSnapshot(segs[0], segs[1], prefix=prefix)
             else:
                 config = utils.Config()
-                return AliOssSnapshot(config.end_point, config.bucket)
+                return AliOssSnapshot(config.end_point, config.bucket,
+                                      prefix=getattr(args, 'prefix', None))
         else:
             if os.path.isdir(path):
                 return LocalSnapshot(path)
@@ -224,10 +232,18 @@ class AliOssSnapshot(Snapshot):
 
     meta_md5 = "x-oss-meta-md5"
 
-    def __init__(self, endpoint, bucket):
+    def __init__(self, endpoint, bucket, prefix=None):
         self._endpoint = endpoint
         self._bucket = bucket
-        Snapshot.__init__(self, "%s:%s" % (endpoint, bucket))
+        self.prefix = prefix or ''
+        if self.prefix != '' and self.prefix[-1] != '/':
+            self.prefix += '/'
+        if self.prefix:
+            root = "%s:%s/%s" % (endpoint, bucket, self.prefix)
+        else:
+            root = "%s:%s" % (endpoint, bucket)
+
+        Snapshot.__init__(self, root)
 
     def push_to(self, snapshot):
         raise NotImplementedError
@@ -239,7 +255,7 @@ class AliOssSnapshot(Snapshot):
             try:
                 objs = [o for o in
                         oss2.ObjectIterator(self.bucket, marker=marker,
-                                            max_keys=1000)]
+                                            max_keys=1000, prefix=self.prefix)]
             except Exception as e:
                 logger.exception(e)
                 raise utils.SnapshotError('scan AliOss bucket failed.')
@@ -248,8 +264,9 @@ class AliOssSnapshot(Snapshot):
                 break
             else:
                 for o in objs:
-                    if not self.should_skip(o.key, key=True):
-                        f = FileIdentity(o.key)
+                    path = o.key[len(self.prefix):]
+                    if not self.should_skip(path, key=True):
+                        f = FileIdentity(path, prefix=self.prefix)
                         if len(o.etag) == 32:
                             f.md5 = o.etag.upper()
                         self.files.append(f)
@@ -271,7 +288,7 @@ class AliOssSnapshot(Snapshot):
 
         for f_id in self.files:
             if md5 and f_id.md5 is None:
-                meta = self.bucket.head_object(f_id.path)
+                meta = self.bucket.head_object(f_id.prefix+f_id.path)
                 f_id.md5 = meta.headers.get(self.meta_md5, "").upper()
             self._frozen_files.add(f_id)
 

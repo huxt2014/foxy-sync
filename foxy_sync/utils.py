@@ -77,11 +77,7 @@ class Config(metaclass=SingletonMeta):
     access_key_secret = None
     end_point = None
     bucket = None
-    test_bucket = None
     multipart_threshold = 30*1024*1024
-
-    # for local file system
-    test_local = None
 
     # for transaction
     num_threads = 2
@@ -97,9 +93,8 @@ class Config(metaclass=SingletonMeta):
     def __init__(self):
         import foxy_sync_settings
         for key in ("access_key_id", "access_key_secret", "end_point", "bucket",
-                    "test_bucket", "test_local", "multipart_threshold",
-                    "num_threads", "cache_dir", "log_config", "log_file",
-                    "skip_dir"):
+                    "multipart_threshold", "num_threads", "cache_dir",
+                    "log_config", "log_file", "skip_dir"):
             value = getattr(foxy_sync_settings, key, None)
             if value is not None:
                 setattr(self, key, value)

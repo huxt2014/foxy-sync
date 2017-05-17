@@ -12,17 +12,22 @@ from foxy_sync import utils
 
 class CaseAlioss(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        config = utils.Config()
-        cls.alioss_snapshot = AliOssSnapshot(config.end_point,
-                                             config.test_bucket)
-        cls.alioss_snapshot.load_detail(md5=True)
-        cls.alioss_snapshot.refresh_session()
-
     def test_print(self):
+        config = utils.Config()
+        alioss_snapshot = AliOssSnapshot(config.end_point, config.bucket)
+        alioss_snapshot.load_detail(md5=True)
+        alioss_snapshot.refresh_session()
         print()
-        print(self.alioss_snapshot)
+        print(alioss_snapshot)
+
+    def test_print_with_prefix(self):
+        config = utils.Config()
+        alioss_snapshot = AliOssSnapshot(config.end_point, config.bucket,
+                                         prefix='test1')
+        alioss_snapshot.load_detail(md5=True)
+        alioss_snapshot.refresh_session()
+        print()
+        print(alioss_snapshot)
 
 
 class CaseLocal(unittest.TestCase):
@@ -50,7 +55,7 @@ class CaseLocal(unittest.TestCase):
         shutil.rmtree(cls.root)
 
     def test_base(self):
-        snapshot = Snapshot.get_instance(self.root)
+        snapshot = Snapshot.get_instance(self.root, '')
 
         # _scan
         assert len(snapshot.files) == len(self.file_set)
@@ -88,9 +93,9 @@ class CaseTrans(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         config = utils.Config()
-        cls.local_snapshot = LocalSnapshot(config.test_local)
+        cls.local_snapshot = LocalSnapshot('/tmp/foxy')
         cls.alioss_snapshot = AliOssSnapshot(config.end_point,
-                                             config.test_bucket)
+                                             config.bucket)
         for s in (cls.local_snapshot, cls.alioss_snapshot):
             s.load_detail(md5=True)
         cls.alioss_snapshot.refresh_session()
@@ -134,3 +139,19 @@ class CaseTrans(unittest.TestCase):
         # pickle
         ts = Transaction.load(transaction.dump_path)
         self.assertTrue(transaction == ts)
+
+
+class CasePrefixTrans(unittest.TestCase):
+
+    def test_1(self):
+        config = utils.Config()
+        local_snapshot = LocalSnapshot('/tmp/foxy/test1')
+        alioss_snapshot = AliOssSnapshot(config.end_point, config.bucket,
+                                         prefix='test1')
+        for s in (local_snapshot, alioss_snapshot):
+            s.load_detail(md5=True)
+        alioss_snapshot.refresh_session()
+        trans = local_snapshot.push_to(alioss_snapshot)
+        trans.get_jobs()
+        print()
+        print(trans)

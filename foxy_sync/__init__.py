@@ -21,6 +21,7 @@ class Run:
     parser.add_argument("dest", nargs="?")
     parser.add_argument("-i", action="store_true",
                         help="start transaction immediately.")
+    parser.add_argument("--prefix")
     parser.add_argument("--version", action="version", version=version)
 
     def start(self):
@@ -59,8 +60,8 @@ class Run:
             else:
                 print(ts)
         else:
-            src = Snapshot.get_instance(args.src)
-            dest = Snapshot.get_instance(args.dest)
+            src = Snapshot.get_instance(args.src, args)
+            dest = Snapshot.get_instance(args.dest, args)
             ts = src.push_to(dest)
             ts.get_jobs()
 
